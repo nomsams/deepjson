@@ -207,7 +207,7 @@
 
 <header>
   <div class="brand">
-    JSON <span>TRANSMUTER</span> <div class="badge">PRO v1.1</div>
+    JSON <span>TRANSMUTER</span> <div class="badge">PRO v1.3</div>
   </div>
   <div style="display: flex; gap: 15px; align-items: center;">
     <button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="loadDemoData()">Load Demo JSON</button>
@@ -251,20 +251,28 @@
         <div id="proxySettings" style="margin-top: 10px; display:flex; flex-direction:column; gap:8px;">
           <label>Proxy Provider</label>
           <select id="proxyProvider">
-             <option value="thingproxy">ThingProxy (Recommended)</option>
-             <option value="corsanywhere">Cors-Anywhere (Stable)</option>
-             <option value="corsproxy">CorsProxy.io (Fast/Unstable)</option>
-             <option value="custom">Custom URL</option>
+             <option value="lovable" selected>Lovable / Supabase (Config Mode)</option>
+             <option value="thingproxy">ThingProxy (Public)</option>
+             <option value="corsanywhere">Cors-Anywhere (Public)</option>
+             <option value="custom">Custom URL (Private)</option>
           </select>
+
+          <div id="authHeaderGroup" style="margin-top:8px; border-top:1px solid var(--panel-border); padding-top:8px;">
+             <label style="color:var(--accent);">Proxy Auth Header (Required)</label>
+             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:5px;">
+                <input type="text" id="proxyHeaderKey" placeholder="Key" value="x-proxy-key">
+                <input type="text" id="proxyHeaderVal" placeholder="Value" value="chikibriki">
+             </div>
+             <div style="font-size:9px; color:var(--text-dim); margin-top:4px;">
+                Using "Config Mode": The request is wrapped in a JSON envelope.
+             </div>
+          </div>
 
           <div id="customProxyGroup" class="hidden">
              <label>Custom Proxy URL</label>
-             <input type="text" id="proxyUrl" value="https://corsproxy.io/?">
+             <input type="text" id="proxyUrl" value="https://onbkfqayveownervyktu.supabase.co/functions/v1/cors-proxy">
           </div>
           
-          <div id="proxyTip" style="font-size: 9px; color: var(--text-dim); margin-top: 4px;">
-            ThingProxy usually handles POST requests best. If it fails, try Cors-Anywhere.
-          </div>
           <a id="corsAnywhereLink" href="https://cors-anywhere.herokuapp.com/corsdemo" target="_blank" class="hidden" style="font-size:10px; color:var(--accent);">⚠ Click here to unlock Cors-Anywhere</a>
         </div>
       </div>
@@ -349,6 +357,7 @@ const CONFIG = {
   phSuffix: '}}',
   batchSize: 25, // Safe limit for DeepL
   proxies: {
+      lovable: "https://onbkfqayveownervyktu.supabase.co/functions/v1/cors-proxy",
       thingproxy: "https://thingproxy.freeboard.io/fetch/",
       corsanywhere: "https://cors-anywhere.herokuapp.com/",
       corsproxy: "https://corsproxy.io/?"
@@ -381,8 +390,11 @@ const UI = {
   targetLang: document.getElementById('targetLang'),
   proxyToggle: document.getElementById('proxyToggle'),
   proxyProvider: document.getElementById('proxyProvider'),
+  authHeaderGroup: document.getElementById('authHeaderGroup'),
   customProxyGroup: document.getElementById('customProxyGroup'),
   proxyUrl: document.getElementById('proxyUrl'),
+  proxyHeaderKey: document.getElementById('proxyHeaderKey'),
+  proxyHeaderVal: document.getElementById('proxyHeaderVal'),
   proxySettings: document.getElementById('proxySettings'),
   corsAnywhereLink: document.getElementById('corsAnywhereLink'),
   
@@ -409,8 +421,16 @@ const UI = {
   // Load persisted keys
   UI.deeplKey.value = localStorage.getItem('t_deeplKey') || '';
   UI.groqKey.value = localStorage.getItem('t_groqKey') || '';
-  UI.proxyProvider.value = localStorage.getItem('t_proxyProvider') || 'thingproxy';
-  UI.proxyUrl.value = localStorage.getItem('t_proxyUrl') || CONFIG.proxies.corsproxy;
+  UI.proxyProvider.value = localStorage.getItem('t_proxyProvider') || 'lovable';
+  
+  // Persist Proxy URL only if it's custom, otherwise default to Lovable for reset
+  if(UI.proxyProvider.value === 'custom') {
+    UI.proxyUrl.value = localStorage.getItem('t_proxyUrl') || CONFIG.proxies.lovable;
+  }
+
+  // Load Headers
+  UI.proxyHeaderKey.value = localStorage.getItem('t_proxyHeadKey') || 'x-proxy-key';
+  UI.proxyHeaderVal.value = localStorage.getItem('t_proxyHeadVal') || 'chikibriki';
   
   updateProxyUI();
 
@@ -419,8 +439,15 @@ const UI = {
   UI.groqKey.addEventListener('change', e => localStorage.setItem('t_groqKey', e.target.value));
   UI.proxyUrl.addEventListener('change', e => localStorage.setItem('t_proxyUrl', e.target.value));
   
+  UI.proxyHeaderKey.addEventListener('change', e => localStorage.setItem('t_proxyHeadKey', e.target.value));
+  UI.proxyHeaderVal.addEventListener('change', e => localStorage.setItem('t_proxyHeadVal', e.target.value));
+  
   UI.proxyProvider.addEventListener('change', (e) => {
       localStorage.setItem('t_proxyProvider', e.target.value);
+      // Auto-set URL if switching to custom from a known provider
+      if(e.target.value === 'custom' && !UI.proxyUrl.value) {
+          UI.proxyUrl.value = CONFIG.proxies.lovable; 
+      }
       updateProxyUI();
   });
 
@@ -445,19 +472,29 @@ const UI = {
 
   UI.btnRun.addEventListener('click', runProcess);
 
-  log('System Initialized. Waiting for input.', 'INFO');
+  log('System Initialized. Ready for Config Mode.', 'INFO');
 })();
 
 function updateProxyUI() {
     const val = UI.proxyProvider.value;
+    
+    // Auth Group visibility: Visible for Custom OR Lovable
+    if(val === 'lovable' || val === 'custom') {
+        UI.authHeaderGroup.classList.remove('hidden');
+    } else {
+        UI.authHeaderGroup.classList.add('hidden');
+    }
+
+    // Custom URL visibility
     if(val === 'custom') {
         UI.customProxyGroup.classList.remove('hidden');
-        UI.corsAnywhereLink.classList.add('hidden');
     } else {
         UI.customProxyGroup.classList.add('hidden');
-        if(val === 'corsanywhere') UI.corsAnywhereLink.classList.remove('hidden');
-        else UI.corsAnywhereLink.classList.add('hidden');
     }
+
+    // CorsAnywhere warning
+    if(val === 'corsanywhere') UI.corsAnywhereLink.classList.remove('hidden');
+    else UI.corsAnywhereLink.classList.add('hidden');
 }
 
 // --- Core Logic ---
@@ -545,33 +582,19 @@ function extractSegments(obj) {
 }
 
 /**
- * Batches segments and calls DeepL
+ * Batches segments and calls DeepL via Proxy
  */
 async function translateSegments(segments, map) {
   const targetLang = UI.targetLang.value;
   const useProxy = UI.proxyToggle.classList.contains('on');
   const proxyProvider = UI.proxyProvider.value;
-  let proxyBase = "";
-  
-  if (useProxy) {
-      if(proxyProvider === 'custom') proxyBase = UI.proxyUrl.value.trim();
-      else proxyBase = CONFIG.proxies[proxyProvider];
-  }
-
   const apiKey = UI.deeplKey.value.trim();
-  let endpoint = "https://api-free.deepl.com/v2/translate";
   
-  // Determine endpoint based on key (DeepL Free vs Pro)
+  // Determine DeepL Endpoint
+  let deepLEndpoint = "https://api-free.deepl.com/v2/translate";
   if (!apiKey.endsWith(":fx")) {
-     endpoint = "https://api.deepl.com/v2/translate";
+     deepLEndpoint = "https://api.deepl.com/v2/translate";
      log("Detected Pro Key, switching endpoint", "INFO");
-  }
-
-  let fullUrl = endpoint;
-  if (useProxy) {
-     // Handling strict encoding requirements
-     if(proxyProvider === 'corsproxy') fullUrl = proxyBase + encodeURIComponent(endpoint);
-     else fullUrl = proxyBase + endpoint;
   }
 
   const total = segments.length;
@@ -584,38 +607,104 @@ async function translateSegments(segments, map) {
     // UI Update
     const pct = Math.round((processed / total) * 80); 
     setProgress(pct, `Translating ${processed}/${total}...`);
-    log(`Sending Batch ${(i/CONFIG.batchSize)+1}...`, "NET", { count: batch.length, url: fullUrl });
 
-    try {
-      const response = await fetch(fullUrl, {
+    let fetchUrl = deepLEndpoint;
+    let fetchOptions = {
         method: 'POST',
         headers: {
           'Authorization': `DeepL-Auth-Key ${apiKey}`,
-          'Content-Type': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest' // Helps with some proxies
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           text: batch,
           target_lang: targetLang
         })
-      });
+    };
+
+    // --- PROXY LOGIC ---
+    if (useProxy) {
+        // 1. LOVABLE / SUPABASE (Config Mode - Wrapper)
+        if (proxyProvider === 'lovable') {
+            const proxyUrl = CONFIG.proxies.lovable;
+            const authKey = UI.proxyHeaderKey.value;
+            const authVal = UI.proxyHeaderVal.value;
+
+            log(`Sending Batch via Lovable Config Mode...`, "NET", { count: batch.length });
+            
+            // Construct the Wrapper Envelope
+            fetchUrl = proxyUrl;
+            fetchOptions = {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    [authKey]: authVal // e.g. x-proxy-key: chikibriki
+                },
+                body: JSON.stringify({
+                    url: deepLEndpoint,
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `DeepL-Auth-Key ${apiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: {
+                        text: batch,
+                        target_lang: targetLang
+                    }
+                })
+            };
+        } 
+        // 2. STANDARD URL APPENDING (ThingProxy, CorsAnywhere, etc)
+        else {
+            let proxyBase = "";
+            if (proxyProvider === 'custom') proxyBase = UI.proxyUrl.value.trim();
+            else proxyBase = CONFIG.proxies[proxyProvider];
+            
+            // Basic URL Construction
+            if (proxyProvider === 'corsproxy') fetchUrl = proxyBase + encodeURIComponent(deepLEndpoint);
+            else fetchUrl = proxyBase + deepLEndpoint;
+
+            // Add Custom Headers if Custom Proxy
+            if (proxyProvider === 'custom' && UI.proxyHeaderKey.value) {
+                 fetchOptions.headers[UI.proxyHeaderKey.value] = UI.proxyHeaderVal.value;
+            }
+            log(`Sending Batch via Standard Proxy...`, "NET", { url: fetchUrl });
+        }
+    } else {
+        log(`Sending Batch Direct (No Proxy)...`, "NET", { url: fetchUrl });
+    }
+
+    try {
+      const response = await fetch(fetchUrl, fetchOptions);
 
       if (!response.ok) {
         const txt = await response.text();
-        throw new Error(`DeepL API ${response.status}: ${txt}`);
+        throw new Error(`API Error ${response.status}: ${txt}`);
       }
 
       const data = await response.json();
       
       // Update Map
-      data.translations.forEach((t, index) => {
-        map.set(batch[index], t.text);
-      });
+      // Note: If using Lovable metadata=true, data structure might differ. 
+      // Assuming standard proxy behavior or pure forwarding.
+      if(data.translations) {
+          data.translations.forEach((t, index) => {
+            map.set(batch[index], t.text);
+          });
+      } else {
+          // If Config Mode returns a wrapper, we might need to drill down. 
+          // Based on doc, Config Mode forwards body directly unless metadata=true.
+          // Fallback check:
+          if(data.body && data.body.translations) {
+               data.body.translations.forEach((t, index) => map.set(batch[index], t.text));
+          } else {
+               throw new Error("Unexpected response structure: " + JSON.stringify(data).slice(0, 100));
+          }
+      }
       
       log(`Batch Received.`, "SUCCESS");
 
     } catch (err) {
-      log(`Batch Failed. Try switching proxies.`, "ERR", err);
+      log(`Batch Failed.`, "ERR", err);
       throw err; 
     }
   }
@@ -654,40 +743,82 @@ async function verifyWithGroq(sourceObj, translatedObj) {
   const prompt = UI.verifyPrompt.value;
   
   const useProxy = UI.proxyToggle.classList.contains('on');
-  let url = "https://api.groq.com/openai/v1/chat/completions";
-  if (useProxy) {
-      // Groq works best with corsproxy.io usually
-      url = CONFIG.proxies.corsproxy + encodeURIComponent(url);
-  }
-
-  const payload = {
-    model: model,
-    messages: [
-      { role: "system", content: "You are a Translation QA Expert. Return VALID JSON only." },
-      { role: "user", content: `Instructions: ${prompt}` },
-      { role: "user", content: `Original JSON:\n${JSON.stringify(sourceObj).slice(0, 10000)}` }, // Truncate safety
-      { role: "user", content: `Translated JSON (Fix this):\n${JSON.stringify(translatedObj)}` }
-    ],
-    response_format: { type: "json_object" },
-    temperature: 0.1
+  const proxyProvider = UI.proxyProvider.value;
+  let deepLEndpoint = "https://api.groq.com/openai/v1/chat/completions";
+  
+  let fetchUrl = deepLEndpoint;
+  let fetchOptions = {
+    method: "POST",
+    headers: { 
+        "Authorization": `Bearer ${key}`, 
+        "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+        model: model,
+        messages: [
+          { role: "system", content: "You are a Translation QA Expert. Return VALID JSON only." },
+          { role: "user", content: `Instructions: ${prompt}` },
+          { role: "user", content: `Original JSON:\n${JSON.stringify(sourceObj).slice(0, 10000)}` },
+          { role: "user", content: `Translated JSON (Fix this):\n${JSON.stringify(translatedObj)}` }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.1
+    })
   };
+
+  if (useProxy) {
+      if (proxyProvider === 'lovable') {
+            const proxyUrl = CONFIG.proxies.lovable;
+            const authKey = UI.proxyHeaderKey.value;
+            const authVal = UI.proxyHeaderVal.value;
+
+            fetchUrl = proxyUrl;
+            fetchOptions = {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    [authKey]: authVal
+                },
+                body: JSON.stringify({
+                    url: deepLEndpoint,
+                    method: 'POST',
+                    headers: {
+                        "Authorization": `Bearer ${key}`, 
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.parse(fetchOptions.body) // Unwrap stringified body for envelope
+                })
+            };
+      } else {
+          // Standard Proxy Logic
+          fetchUrl = CONFIG.proxies.corsproxy + encodeURIComponent(deepLEndpoint);
+      }
+  }
 
   log(`Sending to Groq (${model})...`, "NET");
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
+  const res = await fetch(fetchUrl, fetchOptions);
 
   if(!res.ok) {
     const err = await res.text();
     log("Verification Failed (Skipping)", "WARN", err);
-    return translatedObj; // Return unverified on error
+    return translatedObj; 
   }
 
   const data = await res.json();
-  const content = data.choices[0].message.content;
+  
+  // Handle Wrapper Response if Lovable Config Mode
+  let content;
+  if (proxyProvider === 'lovable' && useProxy && data.body) {
+      // If the proxy returns the upstream body inside 'body'
+      content = data.body.choices[0].message.content;
+  } else if (data.choices) {
+      content = data.choices[0].message.content;
+  } else {
+      // Fallback
+      content = JSON.stringify(data);
+  }
+
   log("Verification Complete.", "SUCCESS");
   
   try {
