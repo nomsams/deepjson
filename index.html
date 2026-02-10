@@ -207,7 +207,7 @@
 
 <header>
   <div class="brand">
-    JSON <span>TRANSMUTER</span> <div class="badge">PRO</div>
+    JSON <span>TRANSMUTER</span> <div class="badge">PRO v1.1</div>
   </div>
   <div style="display: flex; gap: 15px; align-items: center;">
     <button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="loadDemoData()">Load Demo JSON</button>
@@ -248,13 +248,24 @@
           <div class="switch on" id="proxyToggle"></div>
         </div>
         
-        <div id="proxySettings" style="margin-top: 10px;">
-          <label>Proxy URL Prefix</label>
-          <input type="text" id="proxyUrl" value="https://corsproxy.io/?">
-          <div style="font-size: 9px; color: var(--text-dim); margin-top: 4px;">
-            DeepL API calls from browsers are blocked by CORS. A proxy is usually required. 
-            Ensure the URL ends with <code>?</code> or <code>/</code> as needed by the provider.
+        <div id="proxySettings" style="margin-top: 10px; display:flex; flex-direction:column; gap:8px;">
+          <label>Proxy Provider</label>
+          <select id="proxyProvider">
+             <option value="thingproxy">ThingProxy (Recommended)</option>
+             <option value="corsanywhere">Cors-Anywhere (Stable)</option>
+             <option value="corsproxy">CorsProxy.io (Fast/Unstable)</option>
+             <option value="custom">Custom URL</option>
+          </select>
+
+          <div id="customProxyGroup" class="hidden">
+             <label>Custom Proxy URL</label>
+             <input type="text" id="proxyUrl" value="https://corsproxy.io/?">
           </div>
+          
+          <div id="proxyTip" style="font-size: 9px; color: var(--text-dim); margin-top: 4px;">
+            ThingProxy usually handles POST requests best. If it fails, try Cors-Anywhere.
+          </div>
+          <a id="corsAnywhereLink" href="https://cors-anywhere.herokuapp.com/corsdemo" target="_blank" class="hidden" style="font-size:10px; color:var(--accent);">⚠ Click here to unlock Cors-Anywhere</a>
         </div>
       </div>
 
@@ -337,7 +348,11 @@ const CONFIG = {
   phPrefix: '{{IMG:',
   phSuffix: '}}',
   batchSize: 25, // Safe limit for DeepL
-  defaultProxy: "https://corsproxy.io/?",
+  proxies: {
+      thingproxy: "https://thingproxy.freeboard.io/fetch/",
+      corsanywhere: "https://cors-anywhere.herokuapp.com/",
+      corsproxy: "https://corsproxy.io/?"
+  },
   demoData: {
     "header": {
       "title": "Annual Report 2024",
@@ -365,8 +380,11 @@ const UI = {
   deeplKey: document.getElementById('deeplKey'),
   targetLang: document.getElementById('targetLang'),
   proxyToggle: document.getElementById('proxyToggle'),
+  proxyProvider: document.getElementById('proxyProvider'),
+  customProxyGroup: document.getElementById('customProxyGroup'),
   proxyUrl: document.getElementById('proxyUrl'),
   proxySettings: document.getElementById('proxySettings'),
+  corsAnywhereLink: document.getElementById('corsAnywhereLink'),
   
   verifyToggle: document.getElementById('verifyToggle'),
   verifySettings: document.getElementById('verifySettings'),
@@ -391,13 +409,21 @@ const UI = {
   // Load persisted keys
   UI.deeplKey.value = localStorage.getItem('t_deeplKey') || '';
   UI.groqKey.value = localStorage.getItem('t_groqKey') || '';
-  UI.proxyUrl.value = localStorage.getItem('t_proxyUrl') || CONFIG.defaultProxy;
+  UI.proxyProvider.value = localStorage.getItem('t_proxyProvider') || 'thingproxy';
+  UI.proxyUrl.value = localStorage.getItem('t_proxyUrl') || CONFIG.proxies.corsproxy;
   
+  updateProxyUI();
+
   // Listeners
   UI.deeplKey.addEventListener('change', e => localStorage.setItem('t_deeplKey', e.target.value));
   UI.groqKey.addEventListener('change', e => localStorage.setItem('t_groqKey', e.target.value));
   UI.proxyUrl.addEventListener('change', e => localStorage.setItem('t_proxyUrl', e.target.value));
   
+  UI.proxyProvider.addEventListener('change', (e) => {
+      localStorage.setItem('t_proxyProvider', e.target.value);
+      updateProxyUI();
+  });
+
   // Toggles
   document.getElementById('themeSwitch').addEventListener('click', function() {
     this.classList.toggle('on');
@@ -421,6 +447,18 @@ const UI = {
 
   log('System Initialized. Waiting for input.', 'INFO');
 })();
+
+function updateProxyUI() {
+    const val = UI.proxyProvider.value;
+    if(val === 'custom') {
+        UI.customProxyGroup.classList.remove('hidden');
+        UI.corsAnywhereLink.classList.add('hidden');
+    } else {
+        UI.customProxyGroup.classList.add('hidden');
+        if(val === 'corsanywhere') UI.corsAnywhereLink.classList.remove('hidden');
+        else UI.corsAnywhereLink.classList.add('hidden');
+    }
+}
 
 // --- Core Logic ---
 
@@ -512,10 +550,17 @@ function extractSegments(obj) {
 async function translateSegments(segments, map) {
   const targetLang = UI.targetLang.value;
   const useProxy = UI.proxyToggle.classList.contains('on');
-  const proxyUrl = UI.proxyUrl.value.trim();
-  const apiKey = UI.deeplKey.value.trim();
+  const proxyProvider = UI.proxyProvider.value;
+  let proxyBase = "";
+  
+  if (useProxy) {
+      if(proxyProvider === 'custom') proxyBase = UI.proxyUrl.value.trim();
+      else proxyBase = CONFIG.proxies[proxyProvider];
+  }
 
+  const apiKey = UI.deeplKey.value.trim();
   let endpoint = "https://api-free.deepl.com/v2/translate";
+  
   // Determine endpoint based on key (DeepL Free vs Pro)
   if (!apiKey.endsWith(":fx")) {
      endpoint = "https://api.deepl.com/v2/translate";
@@ -524,14 +569,9 @@ async function translateSegments(segments, map) {
 
   let fullUrl = endpoint;
   if (useProxy) {
-    // If proxyUrl ends in ?, just append. If it ends in /, just append. 
-    // If neither, assume it needs full encoding or specific handling. 
-    // Standard corsproxy.io uses ?url=...
-    if(proxyUrl.includes('?')) {
-      fullUrl = proxyUrl + encodeURIComponent(endpoint);
-    } else {
-      fullUrl = proxyUrl + endpoint;
-    }
+     // Handling strict encoding requirements
+     if(proxyProvider === 'corsproxy') fullUrl = proxyBase + encodeURIComponent(endpoint);
+     else fullUrl = proxyBase + endpoint;
   }
 
   const total = segments.length;
@@ -542,7 +582,7 @@ async function translateSegments(segments, map) {
     processed += batch.length;
     
     // UI Update
-    const pct = Math.round((processed / total) * 80); // 80% reserved for translation
+    const pct = Math.round((processed / total) * 80); 
     setProgress(pct, `Translating ${processed}/${total}...`);
     log(`Sending Batch ${(i/CONFIG.batchSize)+1}...`, "NET", { count: batch.length, url: fullUrl });
 
@@ -551,7 +591,8 @@ async function translateSegments(segments, map) {
         method: 'POST',
         headers: {
           'Authorization': `DeepL-Auth-Key ${apiKey}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest' // Helps with some proxies
         },
         body: JSON.stringify({
           text: batch,
@@ -574,7 +615,7 @@ async function translateSegments(segments, map) {
       log(`Batch Received.`, "SUCCESS");
 
     } catch (err) {
-      log(`Batch Failed`, "ERR", err);
+      log(`Batch Failed. Try switching proxies.`, "ERR", err);
       throw err; 
     }
   }
@@ -614,7 +655,10 @@ async function verifyWithGroq(sourceObj, translatedObj) {
   
   const useProxy = UI.proxyToggle.classList.contains('on');
   let url = "https://api.groq.com/openai/v1/chat/completions";
-  if (useProxy) url = UI.proxyUrl.value + encodeURIComponent(url);
+  if (useProxy) {
+      // Groq works best with corsproxy.io usually
+      url = CONFIG.proxies.corsproxy + encodeURIComponent(url);
+  }
 
   const payload = {
     model: model,
