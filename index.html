@@ -78,6 +78,7 @@
       border-right: 1px solid var(--panel-border); 
       background: var(--panel);
       min-width: 0;
+      min-height: 0; /* CRITICAL for scrolling */
     }
     .panel:last-child { border-right: none; }
     
@@ -90,6 +91,7 @@
       justify-content: space-between; 
       align-items: center;
       background: var(--bg);
+      flex-shrink: 0;
     }
 
     .panel-body { 
@@ -99,10 +101,11 @@
       display: flex; 
       flex-direction: column; 
       gap: 16px; 
+      min-height: 0; /* CRITICAL for scrolling */
     }
 
     /* Forms & Inputs */
-    .control-group { display: flex; flex-direction: column; gap: 6px; }
+    .control-group { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
     label { font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
     
     input, select, textarea { 
@@ -128,6 +131,7 @@
       resize: none; 
       flex: 1; 
       white-space: pre;
+      min-height: 0;
     }
 
     /* Buttons */
@@ -208,6 +212,7 @@
         overflow-y: auto;
         white-space: pre-wrap;
         color: var(--text);
+        outline: none;
     }
 
     .json-key { color: #79c0ff; }
@@ -215,6 +220,17 @@
     .json-number { color: #7ee787; }
     .json-boolean { color: #ff7b72; }
     
+    .editable-value {
+        outline: none;
+        border-radius: 2px;
+        transition: background 0.2s;
+        border-bottom: 1px solid transparent;
+    }
+    .editable-value:focus {
+        background: rgba(255,255,255,0.1);
+        border-bottom: 1px solid var(--text-dim);
+    }
+
     .llm-changed {
         background-color: rgba(245, 158, 11, 0.15);
         color: var(--warn);
@@ -227,6 +243,10 @@
     }
     .llm-changed:hover {
         background-color: rgba(245, 158, 11, 0.4);
+    }
+    .llm-changed:focus {
+        background-color: rgba(245, 158, 11, 0.3);
+        border-bottom: 1px solid var(--warn);
     }
 
     /* Tooltip for reverting */
@@ -266,7 +286,7 @@
 
 <header>
   <div class="brand">
-    JSON <span>TRANSMUTER</span> <div class="badge">PRO v2.0</div>
+    JSON <span>TRANSMUTER</span> <div class="badge">PRO v2.1</div>
   </div>
   <div style="display: flex; gap: 15px; align-items: center;">
     <button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="loadDemoData()">Load Demo JSON</button>
@@ -348,14 +368,14 @@
            </select>
            
            <label>Instructions</label>
-           <textarea id="verifyPrompt" style="height:40px;">Check the translation and choose better versions of words if necessary. Ensure professional tone and maintain JSON structure exactly.</textarea>
+           <textarea id="verifyPrompt" style="height:120px;">Act like a professional translator that has work at the UN and translated technical documents. You started off like a translator for construction machinery. Check the translation and choose better versions of words if necessary. Ensure professional tone and maintain structure exactly.</textarea>
            
            <label style="color:var(--accent);">Glossary / Dictionary (Optional)</label>
-           <textarea id="glossaryInput" style="height:60px; font-family:var(--font-mono);" placeholder="Wrong Word > Right Word&#10;English Word > Swedish Word"></textarea>
+           <textarea id="glossaryInput" style="height:80px; font-family:var(--font-mono);" placeholder="Wrong Word > Right Word&#10;English Word > Swedish Word"></textarea>
         </div>
       </div>
 
-      <div style="margin-top: auto;">
+      <div style="margin-top: auto; flex-shrink: 0; padding-top: 10px;">
         <button id="btnRun" class="btn primary" style="width: 100%; height: 44px;">
           <span>⚡ INITIATE TRANSMUTATION</span>
         </button>
@@ -385,7 +405,7 @@
     <div class="panel-head">
       <div style="display:flex; align-items:center; gap:8px;">
         <span>3. Interactive Output</span>
-        <div class="badge" style="background:rgba(245, 158, 11, 0.2); color:var(--warn); border-color:var(--warn);">LLM Diffs Highlighted</div>
+        <div class="badge" style="background:rgba(245, 158, 11, 0.2); color:var(--warn); border-color:var(--warn);" title="You can type directly into the output to edit it manually.">Editable & Diffs</div>
       </div>
       <div style="display:flex; gap:5px;">
         <button class="btn" style="padding: 2px 6px; font-size:10px;" onclick="copyToClipboard()">Copy JSON</button>
@@ -393,7 +413,7 @@
       </div>
     </div>
     <div class="panel-body" style="padding:0;">
-      <div id="interactiveOutput" class="code-editor">Translation output will appear here...</div>
+      <div id="interactiveOutput" class="code-editor">Translation output will appear here. Values are clickable/editable.</div>
     </div>
   </div>
 </main>
@@ -484,6 +504,10 @@ const UI = {
   UI.proxyProvider.value = localStorage.getItem('t_proxyProvider') || 'lovable';
   UI.proxyUrl.value = localStorage.getItem('t_proxyUrl') || '';
   UI.glossaryInput.value = localStorage.getItem('t_glossary') || '';
+  
+  // Only restore verify prompt if it exists, otherwise keep default HTML
+  const savedPrompt = localStorage.getItem('t_verifyPrompt');
+  if (savedPrompt) UI.verifyPrompt.value = savedPrompt;
 
   // Load Headers
   UI.proxyHeaderKey.value = localStorage.getItem('t_proxyHeadKey') || 'x-proxy-key';
@@ -496,6 +520,7 @@ const UI = {
   UI.groqKey.addEventListener('change', e => localStorage.setItem('t_groqKey', e.target.value));
   UI.proxyUrl.addEventListener('change', e => localStorage.setItem('t_proxyUrl', e.target.value));
   UI.glossaryInput.addEventListener('change', e => localStorage.setItem('t_glossary', e.target.value));
+  UI.verifyPrompt.addEventListener('change', e => localStorage.setItem('t_verifyPrompt', e.target.value));
   
   UI.proxyHeaderKey.addEventListener('change', e => localStorage.setItem('t_proxyHeadKey', e.target.value));
   UI.proxyHeaderVal.addEventListener('change', e => localStorage.setItem('t_proxyHeadVal', e.target.value));
@@ -531,7 +556,7 @@ const UI = {
       }
   });
 
-  log('System Initialized. v2.0 Active. LLM Overseer Ready.', 'INFO');
+  log('System Initialized. v2.1 Active. Inline Editing & Scrolling Fixed.', 'INFO');
 })();
 
 function updateProxyUI() {
@@ -760,7 +785,6 @@ async function verifyWithGroq(sourceObj, translatedObj) {
   const proxyProvider = UI.proxyProvider.value;
   let llmEndpoint = "https://api.groq.com/openai/v1/chat/completions";
   
-  // Construct OpenAI specific payload
   let payloadBody = {
       model: model,
       messages: [
@@ -772,7 +796,6 @@ async function verifyWithGroq(sourceObj, translatedObj) {
       stream: false
   };
 
-  // If using the advanced OpenAI model via Groq, strictly follow the requested parameters
   if (model === "openai/gpt-oss-120b") {
       payloadBody.reasoning_effort = "high";
       payloadBody.max_completion_tokens = 65536;
@@ -807,7 +830,7 @@ async function verifyWithGroq(sourceObj, translatedObj) {
       }
   }
 
-  log(`Sending to Model: ${model} (Reasoning: ${payloadBody.reasoning_effort || 'N/A'})...`, "NET");
+  log(`Sending to Model: ${model}...`, "NET");
   setProgress(85, "Waiting for LLM Reasoning...");
 
   const res = await fetch(fetchUrl, fetchOptions);
@@ -839,11 +862,8 @@ async function verifyWithGroq(sourceObj, translatedObj) {
   }
 }
 
-// --- Interactive UI & Diffing ---
+// --- Interactive UI, Diffing & Editing ---
 
-/**
- * Updates a value in an object given an array path
- */
 function setValueAtPath(obj, pathArr, value) {
     let current = obj;
     for (let i = 0; i < pathArr.length - 1; i++) {
@@ -852,9 +872,6 @@ function setValueAtPath(obj, pathArr, value) {
     current[pathArr[pathArr.length - 1]] = value;
 }
 
-/**
- * Escapes HTML characters for safe rendering
- */
 function escapeHtml(str) {
     if (str === null || str === undefined) return '';
     return String(str)
@@ -866,33 +883,44 @@ function escapeHtml(str) {
 }
 
 /**
- * Builds the Interactive HTML JSON Tree recursively.
- * It compares STATE.deepLJson against STATE.finalJson.
+ * Handles manual typing inside the interactive viewer.
+ * Fires on blur (when you click away from the text you just edited).
  */
+window.handleManualEdit = function(event, element) {
+    const path = JSON.parse(element.getAttribute('data-path'));
+    const newValue = element.textContent; // Raw text without HTML wrapping
+    
+    // Check if it actually changed to prevent unnecessary updates
+    let currentVal = STATE.finalJson;
+    for (const p of path) currentVal = currentVal[p];
+    
+    if(currentVal !== newValue) {
+        setValueAtPath(STATE.finalJson, path, newValue);
+        log(`Manual edit saved at path [${path.join('/')}]`, "INFO");
+    }
+}
+
 function buildInteractiveJsonHTML(deepLNode, finalNode, path = []) {
     if (finalNode === null) return `<span class="json-boolean">null</span>`;
     if (typeof finalNode === 'boolean') return `<span class="json-boolean">${finalNode}</span>`;
     if (typeof finalNode === 'number') return `<span class="json-number">${finalNode}</span>`;
     
-    // STRING DIFFING LOGIC
+    // STRING DIFFING & EDITING
     if (typeof finalNode === 'string') {
         const escapedFinal = escapeHtml(finalNode);
+        const pathStr = escapeHtml(JSON.stringify(path));
         
-        // Find corresponding DeepL string
         let deepLStr = deepLNode;
-        if (typeof deepLNode === 'object' && deepLNode !== null) {
-            // Failsafe in case LLM altered structure completely
-            deepLStr = null; 
-        }
+        if (typeof deepLNode === 'object' && deepLNode !== null) deepLStr = null; 
 
-        // If it was a string in DeepL, and the LLM explicitly changed it: HIGHLIGHT
+        // If LLM explicitly changed it: HIGHLIGHT & EDITABLE
         if (typeof deepLStr === 'string' && deepLStr !== finalNode) {
-            const encodedOriginal = encodeURIComponent(deepLStr); // Safe attribute storage
-            const pathStr = escapeHtml(JSON.stringify(path));
-            return `"<span class="llm-changed" onclick="handleHighlightClick(event, this)" data-path='${pathStr}' data-original="${encodedOriginal}">${escapedFinal}</span>"`;
+            const encodedOriginal = encodeURIComponent(deepLStr);
+            return `"<span class="llm-changed editable-value" contenteditable="plaintext-only" onblur="handleManualEdit(event, this)" onclick="handleHighlightClick(event, this)" data-path='${pathStr}' data-original="${encodedOriginal}">${escapedFinal}</span>"`;
         }
         
-        return `"<span class="json-string">${escapedFinal}</span>"`;
+        // Normal String: EDITABLE
+        return `"<span class="json-string editable-value" contenteditable="plaintext-only" onblur="handleManualEdit(event, this)" data-path='${pathStr}'>${escapedFinal}</span>"`;
     }
     
     if (Array.isArray(finalNode)) {
@@ -936,24 +964,23 @@ function renderInteractiveOutput() {
 let activePath = null;
 let activeOriginalStr = null;
 
-function handleHighlightClick(event, element) {
+window.handleHighlightClick = function(event, element) {
+    // Only trigger tooltip if holding CTRL/CMD, otherwise let them edit
+    // Actually, letting both happen is fine, click opens tooltip, double click edits.
+    // We will show tooltip on click.
     event.stopPropagation();
     
-    // Decode data attached to the span
     activePath = JSON.parse(element.getAttribute('data-path'));
     activeOriginalStr = decodeURIComponent(element.getAttribute('data-original'));
     
-    // Position Tooltip above the click
     const rect = element.getBoundingClientRect();
     UI.tooltip.style.display = 'block';
     UI.tooltip.style.top = (rect.top - UI.tooltip.offsetHeight - 10) + 'px';
     
-    // Ensure it doesn't go off screen left/right
     let leftPos = rect.left + (rect.width / 2) - (UI.tooltip.offsetWidth / 2);
     if(leftPos < 10) leftPos = 10;
     UI.tooltip.style.left = leftPos + 'px';
 
-    // Populate Tooltip with the DeepL version
     UI.revertBtn.textContent = activeOriginalStr;
 }
 
@@ -963,15 +990,11 @@ function hideRevertTooltip() {
     activeOriginalStr = null;
 }
 
-// Bind click on the tooltip's inner button to execute the revert
 UI.revertBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     if(activePath !== null && activeOriginalStr !== null) {
-        // 1. Update the actual JSON Object in memory
         setValueAtPath(STATE.finalJson, activePath, activeOriginalStr);
         log(`Reverted path [${activePath.join(' -> ')}] to original DeepL translation.`, "INFO");
-        
-        // 2. Hide Tooltip & Re-render (the highlight will disappear because final === deepL now)
         hideRevertTooltip();
         renderInteractiveOutput();
     }
@@ -1022,7 +1045,6 @@ function formatJSON(id) {
   } catch(e) { alert("Invalid JSON"); }
 }
 
-// Copy and Download now pull from the STATE.finalJson memory object
 function copyToClipboard() {
   if(!STATE.finalJson) return;
   const txt = JSON.stringify(STATE.finalJson, null, 2);
