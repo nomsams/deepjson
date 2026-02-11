@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>JSON Transmuter • DeepL & Verify</title>
+  <title>JSON Transmuter • DeepL & OpenAI Verify</title>
 
   <style>
     :root {
@@ -196,13 +196,77 @@
     .L-NET { color: #3b82f6; }
 
     .hidden { display: none !important; }
+
+    /* Interactive JSON Viewer Styles */
+    #interactiveOutput {
+        background: var(--code-bg);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        line-height: 1.6;
+        padding: 15px;
+        flex: 1;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        color: var(--text);
+    }
+
+    .json-key { color: #79c0ff; }
+    .json-string { color: #a5d6ff; }
+    .json-number { color: #7ee787; }
+    .json-boolean { color: #ff7b72; }
+    
+    .llm-changed {
+        background-color: rgba(245, 158, 11, 0.15);
+        color: var(--warn);
+        border-bottom: 1px dashed var(--warn);
+        cursor: pointer;
+        position: relative;
+        padding: 1px 3px;
+        border-radius: 3px;
+        transition: 0.2s;
+    }
+    .llm-changed:hover {
+        background-color: rgba(245, 158, 11, 0.4);
+    }
+
+    /* Tooltip for reverting */
+    #revertTooltip {
+        position: fixed;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        padding: 10px;
+        border-radius: 8px;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.8);
+        display: none;
+        z-index: 500;
+        min-width: 250px;
+        max-width: 400px;
+        font-family: var(--font-sans);
+        color: var(--text);
+        pointer-events: auto;
+    }
+    .revert-title { font-size: 10px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 8px; font-weight: bold;}
+    .revert-option { 
+        padding: 8px 10px; 
+        background: var(--code-bg); 
+        border-radius: 6px; 
+        margin-bottom: 0; 
+        cursor: pointer;
+        font-size: 12px;
+        border: 1px solid var(--panel-border);
+        transition: 0.2s;
+    }
+    .revert-option:hover {
+        border-color: var(--accent);
+        background: rgba(139, 92, 246, 0.1);
+    }
   </style>
 </head>
 <body>
 
 <header>
   <div class="brand">
-    JSON <span>TRANSMUTER</span> <div class="badge">PRO v1.4</div>
+    JSON <span>TRANSMUTER</span> <div class="badge">PRO v2.0</div>
   </div>
   <div style="display: flex; gap: 15px; align-items: center;">
     <button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="loadDemoData()">Load Demo JSON</button>
@@ -269,19 +333,25 @@
 
       <div class="control-group" style="margin-top: 10px; padding: 10px; background: var(--bg); border: 1px solid var(--panel-border); border-radius: 6px;">
         <div class="toggle-row">
-          <label style="margin:0;">LLM Verification (Groq)</label>
-          <div class="switch" id="verifyToggle"></div>
+          <label style="margin:0;">LLM Verification (Overseer)</label>
+          <div class="switch on" id="verifyToggle"></div>
         </div>
-        <div id="verifySettings" class="hidden" style="margin-top: 10px; display:flex; flex-direction:column; gap:8px;">
+        <div id="verifySettings" style="margin-top: 10px; display:flex; flex-direction:column; gap:8px;">
            <label>Groq API Key</label>
            <input type="password" id="groqKey" placeholder="gsk_...">
-           <label>Model</label>
+           
+           <label>Reasoning Model</label>
            <select id="groqModel">
+             <option value="openai/gpt-oss-120b" selected>OpenAI (gpt-oss-120b) - High Reasoning</option>
              <option value="llama-3.3-70b-versatile">Llama 3.3 70b</option>
              <option value="mixtral-8x7b-32768">Mixtral 8x7b</option>
            </select>
+           
            <label>Instructions</label>
-           <textarea id="verifyPrompt" style="height:60px;">Fix grammar errors. Ensure professional tone. Maintain JSON structure.</textarea>
+           <textarea id="verifyPrompt" style="height:40px;">Check the translation and choose better versions of words if necessary. Ensure professional tone and maintain JSON structure exactly.</textarea>
+           
+           <label style="color:var(--accent);">Glossary / Dictionary (Optional)</label>
+           <textarea id="glossaryInput" style="height:60px; font-family:var(--font-mono);" placeholder="Wrong Word > Right Word&#10;English Word > Swedish Word"></textarea>
         </div>
       </div>
 
@@ -313,14 +383,17 @@
 
   <div class="panel">
     <div class="panel-head">
-      <span>3. Result JSON</span>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span>3. Interactive Output</span>
+        <div class="badge" style="background:rgba(245, 158, 11, 0.2); color:var(--warn); border-color:var(--warn);">LLM Diffs Highlighted</div>
+      </div>
       <div style="display:flex; gap:5px;">
-        <button class="btn" style="padding: 2px 6px; font-size:10px;" onclick="copyToClipboard()">Copy</button>
-        <button class="btn" style="padding: 2px 6px; font-size:10px;" onclick="downloadJSON()">Download</button>
+        <button class="btn" style="padding: 2px 6px; font-size:10px;" onclick="copyToClipboard()">Copy JSON</button>
+        <button class="btn primary" style="padding: 2px 6px; font-size:10px;" onclick="downloadJSON()">Download JSON</button>
       </div>
     </div>
     <div class="panel-body" style="padding:0;">
-      <textarea id="outputJson" class="code-editor" style="border:none; border-radius:0; padding:15px; color: var(--success);" readonly placeholder="Translation output will appear here..."></textarea>
+      <div id="interactiveOutput" class="code-editor">Translation output will appear here...</div>
     </div>
   </div>
 </main>
@@ -331,6 +404,12 @@
     <span>▲ TOGGLE DRAWER</span>
   </div>
   <div id="logContainer" class="log-content"></div>
+</div>
+
+<div id="revertTooltip">
+    <div class="revert-title">DeepL Original Translation</div>
+    <div id="revertOption" class="revert-option" title="Click to revert to this version"></div>
+    <div style="font-size:9px; color:var(--text-dim); text-align:right; margin-top:6px;">Click to revert</div>
 </div>
 
 <script>
@@ -358,6 +437,12 @@ const CONFIG = {
   }
 };
 
+const STATE = {
+  sourceObj: null,
+  deepLJson: null,
+  finalJson: null // Stores the active, modifiable JSON
+};
+
 const UI = {
   deeplKey: document.getElementById('deeplKey'),
   targetLang: document.getElementById('targetLang'),
@@ -375,16 +460,19 @@ const UI = {
   groqKey: document.getElementById('groqKey'),
   groqModel: document.getElementById('groqModel'),
   verifyPrompt: document.getElementById('verifyPrompt'),
+  glossaryInput: document.getElementById('glossaryInput'),
   
   input: document.getElementById('inputJson'),
-  output: document.getElementById('outputJson'),
+  output: document.getElementById('interactiveOutput'),
   
   btnRun: document.getElementById('btnRun'),
   status: document.getElementById('statusText'),
   pct: document.getElementById('pctText'),
   bar: document.getElementById('progressBar'),
   
-  logs: document.getElementById('logContainer')
+  logs: document.getElementById('logContainer'),
+  tooltip: document.getElementById('revertTooltip'),
+  revertBtn: document.getElementById('revertOption')
 };
 
 // --- Initialization ---
@@ -395,6 +483,7 @@ const UI = {
   UI.groqKey.value = localStorage.getItem('t_groqKey') || '';
   UI.proxyProvider.value = localStorage.getItem('t_proxyProvider') || 'lovable';
   UI.proxyUrl.value = localStorage.getItem('t_proxyUrl') || '';
+  UI.glossaryInput.value = localStorage.getItem('t_glossary') || '';
 
   // Load Headers
   UI.proxyHeaderKey.value = localStorage.getItem('t_proxyHeadKey') || 'x-proxy-key';
@@ -406,6 +495,7 @@ const UI = {
   UI.deeplKey.addEventListener('change', e => localStorage.setItem('t_deeplKey', e.target.value));
   UI.groqKey.addEventListener('change', e => localStorage.setItem('t_groqKey', e.target.value));
   UI.proxyUrl.addEventListener('change', e => localStorage.setItem('t_proxyUrl', e.target.value));
+  UI.glossaryInput.addEventListener('change', e => localStorage.setItem('t_glossary', e.target.value));
   
   UI.proxyHeaderKey.addEventListener('change', e => localStorage.setItem('t_proxyHeadKey', e.target.value));
   UI.proxyHeaderVal.addEventListener('change', e => localStorage.setItem('t_proxyHeadVal', e.target.value));
@@ -425,36 +515,32 @@ const UI = {
   UI.proxyToggle.addEventListener('click', function() {
     this.classList.toggle('on');
     UI.proxySettings.classList.toggle('hidden', !this.classList.contains('on'));
-    log(`CORS Proxy ${this.classList.contains('on') ? 'Enabled' : 'Disabled'}`, 'INFO');
   });
 
   UI.verifyToggle.addEventListener('click', function() {
     this.classList.toggle('on');
     UI.verifySettings.classList.toggle('hidden', !this.classList.contains('on'));
-    log(`Verification Module ${this.classList.contains('on') ? 'Enabled' : 'Disabled'}`, 'INFO');
   });
 
   UI.btnRun.addEventListener('click', runProcess);
 
-  log('System Initialized. v1.4 Active. Strict Key Extraction Enabled.', 'INFO');
+  // Close tooltip on outside click
+  document.addEventListener('click', (e) => {
+      if (!e.target.closest('.llm-changed') && !e.target.closest('#revertTooltip')) {
+          hideRevertTooltip();
+      }
+  });
+
+  log('System Initialized. v2.0 Active. LLM Overseer Ready.', 'INFO');
 })();
 
 function updateProxyUI() {
     const val = UI.proxyProvider.value;
-    
-    // Auth Group visibility
-    if(val === 'lovable' || val === 'custom') {
-        UI.authHeaderGroup.classList.remove('hidden');
-    } else {
-        UI.authHeaderGroup.classList.add('hidden');
-    }
+    if(val === 'lovable' || val === 'custom') UI.authHeaderGroup.classList.remove('hidden');
+    else UI.authHeaderGroup.classList.add('hidden');
 
-    // Custom URL visibility
-    if(val === 'custom') {
-        UI.customProxyGroup.classList.remove('hidden');
-    } else {
-        UI.customProxyGroup.classList.add('hidden');
-    }
+    if(val === 'custom') UI.customProxyGroup.classList.remove('hidden');
+    else UI.customProxyGroup.classList.add('hidden');
 }
 
 // --- Core Logic ---
@@ -464,50 +550,52 @@ async function runProcess() {
   if(!jsonStr) return alert("Please enter JSON input.");
   if(!UI.deeplKey.value) return alert("DeepL API Key is required.");
 
-  let sourceObj;
   try {
-    sourceObj = JSON.parse(jsonStr);
+    STATE.sourceObj = JSON.parse(jsonStr);
   } catch(e) {
     log("Invalid JSON Input", "ERR");
     return alert("Invalid JSON");
   }
 
   setRunning(true);
+  hideRevertTooltip();
   log("Starting Targeted Extraction...", "INFO");
 
   try {
     // 1. Extract Segments ONLY from targeted keys
-    const { segments, map } = extractTargetedSegments(sourceObj);
+    const { segments, map } = extractTargetedSegments(STATE.sourceObj);
     log(`Extracted ${segments.length} unique strings from target keys.`, "INFO", segments);
 
     if(segments.length === 0) {
       log("No translatable text found in target keys.", "WARN");
-      UI.output.value = JSON.stringify(sourceObj, null, 2);
+      STATE.finalJson = JSON.parse(JSON.stringify(STATE.sourceObj));
+      renderInteractiveOutput();
       setRunning(false);
       return;
     }
 
-    // 2. Translate Batch
+    // 2. Translate Batch via DeepL
     await translateSegments(segments, map);
 
-    // 3. Reconstruct
-    log("Reconstructing JSON Structure...", "INFO");
-    let translatedObj = reconstructJson(sourceObj, map);
+    // 3. Reconstruct DeepL JSON
+    log("Reconstructing DeepL Baseline...", "INFO");
+    STATE.deepLJson = reconstructJson(STATE.sourceObj, map);
+    STATE.finalJson = JSON.parse(JSON.stringify(STATE.deepLJson)); // Default Final = DeepL
 
-    // 4. Verify (Optional)
+    // 4. Overseer LLM Verification
     if(UI.verifyToggle.classList.contains('on')) {
       if(!UI.groqKey.value) throw new Error("Verification enabled but no Groq Key provided.");
-      translatedObj = await verifyWithGroq(sourceObj, translatedObj);
+      STATE.finalJson = await verifyWithGroq(STATE.sourceObj, STATE.deepLJson);
     }
 
-    // 5. Output
-    UI.output.value = JSON.stringify(translatedObj, null, 2);
+    // 5. Output UI Rendering
+    renderInteractiveOutput();
     log("Process Complete.", "SUCCESS");
     setProgress(100, "Done");
 
   } catch (e) {
     log(e.message, "ERR", e.stack);
-    alert("Process Failed: " + e.message);
+    alert("Process Failed: Check logs for details.");
   } finally {
     setRunning(false);
   }
@@ -522,10 +610,8 @@ function extractTargetedSegments(obj) {
 
   const walk = (node, currentKey = null) => {
     if (typeof node === 'string') {
-      // Check if this string belongs to a key we want to translate
       if (currentKey && CONFIG.targetKeys.includes(currentKey)) {
           const s = node.trim();
-          // Logic: Must be > 1 char, not a number, not an image placeholder
           if (s.length > 1 && isNaN(s) && !s.startsWith(CONFIG.phPrefix)) {
             if (!map.has(node)) {
               map.set(node, null);
@@ -534,17 +620,14 @@ function extractTargetedSegments(obj) {
           }
       }
     } else if (Array.isArray(node)) {
-      // Arrays inherit the key of their parent (e.g. "text": ["hello", "world"])
       node.forEach(item => walk(item, currentKey));
     } else if (typeof node === 'object' && node !== null) {
-      // For objects, pass the key down to the next level
       for (const [key, value] of Object.entries(node)) {
         walk(value, key);
       }
     }
   };
 
-  // Start walking. Root has no parent key.
   walk(obj, null);
   return { segments, map };
 }
@@ -558,11 +641,9 @@ async function translateSegments(segments, map) {
   const proxyProvider = UI.proxyProvider.value;
   const apiKey = UI.deeplKey.value.trim();
   
-  // Determine DeepL Endpoint
   let deepLEndpoint = "https://api-free.deepl.com/v2/translate";
   if (!apiKey.endsWith(":fx")) {
      deepLEndpoint = "https://api.deepl.com/v2/translate";
-     log("Detected Pro Key, switching endpoint", "INFO");
   }
 
   const total = segments.length;
@@ -572,13 +653,9 @@ async function translateSegments(segments, map) {
     const batch = segments.slice(i, i + CONFIG.batchSize);
     processed += batch.length;
     
-    // UI Update
-    const pct = Math.round((processed / total) * 80); 
-    setProgress(pct, `Translating ${processed}/${total}...`);
+    setProgress(Math.round((processed / total) * 50), `DeepL Translating ${processed}/${total}...`);
 
     let fetchUrl = deepLEndpoint;
-    
-    // DeepL Payload - Added tag_handling: 'html' to preserve <strong>, <br>, etc.
     const deepLBody = {
         text: batch,
         target_lang: targetLang,
@@ -594,21 +671,14 @@ async function translateSegments(segments, map) {
         body: JSON.stringify(deepLBody)
     };
 
-    // --- PROXY LOGIC ---
     if (useProxy) {
         if (proxyProvider === 'lovable') {
-            const proxyUrl = CONFIG.proxies.lovable;
-            const authKey = UI.proxyHeaderKey.value;
-            const authVal = UI.proxyHeaderVal.value;
-
-            log(`Sending Batch via Lovable Config Mode...`, "NET", { count: batch.length });
-            
-            fetchUrl = proxyUrl;
+            fetchUrl = CONFIG.proxies.lovable;
             fetchOptions = {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    [authKey]: authVal 
+                    [UI.proxyHeaderKey.value]: UI.proxyHeaderVal.value 
                 },
                 body: JSON.stringify({
                     url: deepLEndpoint,
@@ -622,48 +692,29 @@ async function translateSegments(segments, map) {
             };
         } 
         else {
-            let proxyBase = "";
-            if (proxyProvider === 'custom') proxyBase = UI.proxyUrl.value.trim();
-            else proxyBase = CONFIG.proxies[proxyProvider];
-            
+            let proxyBase = (proxyProvider === 'custom') ? UI.proxyUrl.value.trim() : CONFIG.proxies[proxyProvider];
             fetchUrl = proxyBase + deepLEndpoint;
-
             if (proxyProvider === 'custom' && UI.proxyHeaderKey.value) {
                  fetchOptions.headers[UI.proxyHeaderKey.value] = UI.proxyHeaderVal.value;
             }
-            log(`Sending Batch via Standard Proxy...`, "NET", { url: fetchUrl });
         }
     }
 
-    try {
-      const response = await fetch(fetchUrl, fetchOptions);
+    const response = await fetch(fetchUrl, fetchOptions);
 
-      if (!response.ok) {
-        const txt = await response.text();
-        throw new Error(`API Error ${response.status}: ${txt}`);
-      }
+    if (!response.ok) {
+      const txt = await response.text();
+      throw new Error(`DeepL API Error ${response.status}: ${txt}`);
+    }
 
-      const data = await response.json();
-      
-      // Update Map
-      if(data.translations) {
-          data.translations.forEach((t, index) => {
-            map.set(batch[index], t.text);
-          });
-      } else {
-          // Wrapper check
-          if(data.body && data.body.translations) {
-               data.body.translations.forEach((t, index) => map.set(batch[index], t.text));
-          } else {
-               throw new Error("Unexpected response structure: " + JSON.stringify(data).slice(0, 100));
-          }
-      }
-      
-      log(`Batch Received.`, "SUCCESS");
-
-    } catch (err) {
-      log(`Batch Failed.`, "ERR", err);
-      throw err; 
+    const data = await response.json();
+    
+    if(data.translations) {
+        data.translations.forEach((t, index) => map.set(batch[index], t.text));
+    } else if(data.body && data.body.translations) {
+        data.body.translations.forEach((t, index) => map.set(batch[index], t.text));
+    } else {
+        throw new Error("Unexpected DeepL response structure.");
     }
   }
 }
@@ -672,18 +723,12 @@ async function translateSegments(segments, map) {
  * Replaces strings in the original object using the Map
  */
 function reconstructJson(obj, map) {
-  // We don't need to check keys here because the map ONLY contains strings
-  // that were extracted from valid keys. If it's in the map, we translate it.
   const apply = (node) => {
-    if (typeof node === 'string') {
-      return map.has(node) ? map.get(node) : node;
-    } else if (Array.isArray(node)) {
-      return node.map(apply);
-    } else if (typeof node === 'object' && node !== null) {
+    if (typeof node === 'string') return map.has(node) ? map.get(node) : node;
+    if (Array.isArray(node)) return node.map(apply);
+    if (typeof node === 'object' && node !== null) {
       const newObj = {};
-      for (const k in node) {
-        newObj[k] = apply(node[k]);
-      }
+      for (const k in node) newObj[k] = apply(node[k]);
       return newObj;
     }
     return node;
@@ -692,76 +737,84 @@ function reconstructJson(obj, map) {
 }
 
 /**
- * Optional: Sends Source + Translated JSON to Groq for QA
+ * OpenAI / Groq LLM Verification with High Reasoning Output
  */
 async function verifyWithGroq(sourceObj, translatedObj) {
-  log("Initiating LLM Verification...", "INFO");
-  setProgress(90, "Verifying...");
+  log("Initiating LLM Overseer Verification...", "INFO");
+  setProgress(70, "LLM Verifying Diffs...");
   
   const key = UI.groqKey.value;
   const model = UI.groqModel.value;
-  const prompt = UI.verifyPrompt.value;
+  const promptTxt = UI.verifyPrompt.value;
+  const glossary = UI.glossaryInput.value.trim();
   
+  let sysContent = "You are a Translation QA Expert. Return ONLY the fully complete, valid JSON object matching the structure provided.";
+  let userContent = `Instructions: ${promptTxt}\n\n`;
+  if (glossary) {
+      userContent += `!!! CRITICAL GLOSSARY (You MUST apply these fixes if found in the translation):\n${glossary}\n\n`;
+  }
+  userContent += `Original JSON:\n${JSON.stringify(sourceObj).slice(0, 15000)}\n\n`;
+  userContent += `DeepL Translation (Fix this using glossary and context):\n${JSON.stringify(translatedObj)}`;
+
   const useProxy = UI.proxyToggle.classList.contains('on');
   const proxyProvider = UI.proxyProvider.value;
-  let deepLEndpoint = "https://api.groq.com/openai/v1/chat/completions";
+  let llmEndpoint = "https://api.groq.com/openai/v1/chat/completions";
   
-  let fetchUrl = deepLEndpoint;
+  // Construct OpenAI specific payload
+  let payloadBody = {
+      model: model,
+      messages: [
+        { role: "system", content: sysContent },
+        { role: "user", content: userContent }
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.2,
+      stream: false
+  };
+
+  // If using the advanced OpenAI model via Groq, strictly follow the requested parameters
+  if (model === "openai/gpt-oss-120b") {
+      payloadBody.reasoning_effort = "high";
+      payloadBody.max_completion_tokens = 65536;
+      payloadBody.top_p = 1;
+  }
+
+  let fetchUrl = llmEndpoint;
   let fetchOptions = {
     method: "POST",
-    headers: { 
-        "Authorization": `Bearer ${key}`, 
-        "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-        model: model,
-        messages: [
-          { role: "system", content: "You are a Translation QA Expert. Return VALID JSON only." },
-          { role: "user", content: `Instructions: ${prompt}` },
-          { role: "user", content: `Original JSON:\n${JSON.stringify(sourceObj).slice(0, 10000)}` },
-          { role: "user", content: `Translated JSON (Fix this):\n${JSON.stringify(translatedObj)}` }
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0.1
-    })
+    headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify(payloadBody)
   };
 
   if (useProxy) {
       if (proxyProvider === 'lovable') {
-            const proxyUrl = CONFIG.proxies.lovable;
-            const authKey = UI.proxyHeaderKey.value;
-            const authVal = UI.proxyHeaderVal.value;
-
-            fetchUrl = proxyUrl;
+            fetchUrl = CONFIG.proxies.lovable;
             fetchOptions = {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    [authKey]: authVal
+                    [UI.proxyHeaderKey.value]: UI.proxyHeaderVal.value
                 },
                 body: JSON.stringify({
-                    url: deepLEndpoint,
+                    url: llmEndpoint,
                     method: 'POST',
-                    headers: {
-                        "Authorization": `Bearer ${key}`, 
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.parse(fetchOptions.body) 
+                    headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+                    body: payloadBody 
                 })
             };
       } else {
-          // Standard Proxy Logic
-          fetchUrl = "https://thingproxy.freeboard.io/fetch/" + deepLEndpoint;
+          fetchUrl = "https://thingproxy.freeboard.io/fetch/" + llmEndpoint;
       }
   }
 
-  log(`Sending to Groq (${model})...`, "NET");
+  log(`Sending to Model: ${model} (Reasoning: ${payloadBody.reasoning_effort || 'N/A'})...`, "NET");
+  setProgress(85, "Waiting for LLM Reasoning...");
 
   const res = await fetch(fetchUrl, fetchOptions);
 
   if(!res.ok) {
     const err = await res.text();
-    log("Verification Failed (Skipping)", "WARN", err);
+    log("LLM Verification Failed. Falling back to DeepL.", "WARN", err);
     return translatedObj; 
   }
 
@@ -776,34 +829,168 @@ async function verifyWithGroq(sourceObj, translatedObj) {
       content = JSON.stringify(data);
   }
 
-  log("Verification Complete.", "SUCCESS");
+  log("LLM Verification Complete.", "SUCCESS");
   
   try {
     return JSON.parse(content);
   } catch(e) {
-    log("LLM returned invalid JSON. Using raw translation.", "WARN");
+    log("LLM returned malformed JSON. Using raw DeepL translation.", "WARN");
     return translatedObj;
   }
 }
 
-// --- Helpers ---
+// --- Interactive UI & Diffing ---
+
+/**
+ * Updates a value in an object given an array path
+ */
+function setValueAtPath(obj, pathArr, value) {
+    let current = obj;
+    for (let i = 0; i < pathArr.length - 1; i++) {
+        current = current[pathArr[i]];
+    }
+    current[pathArr[pathArr.length - 1]] = value;
+}
+
+/**
+ * Escapes HTML characters for safe rendering
+ */
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
+}
+
+/**
+ * Builds the Interactive HTML JSON Tree recursively.
+ * It compares STATE.deepLJson against STATE.finalJson.
+ */
+function buildInteractiveJsonHTML(deepLNode, finalNode, path = []) {
+    if (finalNode === null) return `<span class="json-boolean">null</span>`;
+    if (typeof finalNode === 'boolean') return `<span class="json-boolean">${finalNode}</span>`;
+    if (typeof finalNode === 'number') return `<span class="json-number">${finalNode}</span>`;
+    
+    // STRING DIFFING LOGIC
+    if (typeof finalNode === 'string') {
+        const escapedFinal = escapeHtml(finalNode);
+        
+        // Find corresponding DeepL string
+        let deepLStr = deepLNode;
+        if (typeof deepLNode === 'object' && deepLNode !== null) {
+            // Failsafe in case LLM altered structure completely
+            deepLStr = null; 
+        }
+
+        // If it was a string in DeepL, and the LLM explicitly changed it: HIGHLIGHT
+        if (typeof deepLStr === 'string' && deepLStr !== finalNode) {
+            const encodedOriginal = encodeURIComponent(deepLStr); // Safe attribute storage
+            const pathStr = escapeHtml(JSON.stringify(path));
+            return `"<span class="llm-changed" onclick="handleHighlightClick(event, this)" data-path='${pathStr}' data-original="${encodedOriginal}">${escapedFinal}</span>"`;
+        }
+        
+        return `"<span class="json-string">${escapedFinal}</span>"`;
+    }
+    
+    if (Array.isArray(finalNode)) {
+        if (finalNode.length === 0) return '[]';
+        let html = '[\n';
+        for (let i = 0; i < finalNode.length; i++) {
+            const dObj = (Array.isArray(deepLNode) && deepLNode.length > i) ? deepLNode[i] : null;
+            const inner = buildInteractiveJsonHTML(dObj, finalNode[i], [...path, i]);
+            html += '  '.repeat(path.length + 1) + inner + (i < finalNode.length - 1 ? ',' : '') + '\n';
+        }
+        html += '  '.repeat(path.length) + ']';
+        return html;
+    }
+    
+    if (typeof finalNode === 'object') {
+        const keys = Object.keys(finalNode);
+        if (keys.length === 0) return '{}';
+        let html = '{\n';
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i];
+            const dObj = (deepLNode !== null && typeof deepLNode === 'object' && key in deepLNode) ? deepLNode[key] : null;
+            const inner = buildInteractiveJsonHTML(dObj, finalNode[key], [...path, key]);
+            html += '  '.repeat(path.length + 1) + `"<span class="json-key">${escapeHtml(key)}</span>": ` + inner + (i < keys.length - 1 ? ',' : '') + '\n';
+        }
+        html += '  '.repeat(path.length) + '}';
+        return html;
+    }
+}
+
+function renderInteractiveOutput() {
+    if (!STATE.finalJson) {
+        UI.output.innerHTML = "";
+        return;
+    }
+    const html = buildInteractiveJsonHTML(STATE.deepLJson, STATE.finalJson);
+    UI.output.innerHTML = html;
+}
+
+// --- Tooltip & Revert Handling ---
+
+let activePath = null;
+let activeOriginalStr = null;
+
+function handleHighlightClick(event, element) {
+    event.stopPropagation();
+    
+    // Decode data attached to the span
+    activePath = JSON.parse(element.getAttribute('data-path'));
+    activeOriginalStr = decodeURIComponent(element.getAttribute('data-original'));
+    
+    // Position Tooltip above the click
+    const rect = element.getBoundingClientRect();
+    UI.tooltip.style.display = 'block';
+    UI.tooltip.style.top = (rect.top - UI.tooltip.offsetHeight - 10) + 'px';
+    
+    // Ensure it doesn't go off screen left/right
+    let leftPos = rect.left + (rect.width / 2) - (UI.tooltip.offsetWidth / 2);
+    if(leftPos < 10) leftPos = 10;
+    UI.tooltip.style.left = leftPos + 'px';
+
+    // Populate Tooltip with the DeepL version
+    UI.revertBtn.textContent = activeOriginalStr;
+}
+
+function hideRevertTooltip() {
+    UI.tooltip.style.display = 'none';
+    activePath = null;
+    activeOriginalStr = null;
+}
+
+// Bind click on the tooltip's inner button to execute the revert
+UI.revertBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if(activePath !== null && activeOriginalStr !== null) {
+        // 1. Update the actual JSON Object in memory
+        setValueAtPath(STATE.finalJson, activePath, activeOriginalStr);
+        log(`Reverted path [${activePath.join(' -> ')}] to original DeepL translation.`, "INFO");
+        
+        // 2. Hide Tooltip & Re-render (the highlight will disappear because final === deepL now)
+        hideRevertTooltip();
+        renderInteractiveOutput();
+    }
+});
+
+// --- General Helpers ---
 
 function log(msg, type="INFO", details=null) {
   const div = document.createElement('div');
   div.className = 'log-line';
-  
   const time = new Date().toLocaleTimeString('en-US', {hour12:false}) + "." + new Date().getMilliseconds();
   const detailStr = details ? `\n${JSON.stringify(details, null, 2)}` : '';
-  
   div.innerHTML = `
     <span class="log-time">[${time}]</span>
     <span class="log-type L-${type}">${type}</span>
     <span class="log-msg">${msg}${detailStr ? `<span style="color:#555">${detailStr}</span>` : ''}</span>
   `;
-  
   UI.logs.appendChild(div);
   UI.logs.scrollTop = UI.logs.scrollHeight;
-  
   if(type === 'ERR') document.getElementById('logsDrawer').classList.add('open');
 }
 
@@ -817,11 +1004,8 @@ function setRunning(isRunning) {
   UI.btnRun.disabled = isRunning;
   UI.input.disabled = isRunning;
   if(isRunning) {
-    UI.output.value = "";
+    UI.output.innerHTML = "";
     UI.bar.style.width = "0%";
-    UI.output.style.color = "var(--text-dim)";
-  } else {
-    UI.output.style.color = "var(--success)";
   }
 }
 
@@ -838,19 +1022,21 @@ function formatJSON(id) {
   } catch(e) { alert("Invalid JSON"); }
 }
 
+// Copy and Download now pull from the STATE.finalJson memory object
 function copyToClipboard() {
-  UI.output.select();
-  document.execCommand('copy');
-  log("Copied to clipboard.", "INFO");
+  if(!STATE.finalJson) return;
+  const txt = JSON.stringify(STATE.finalJson, null, 2);
+  navigator.clipboard.writeText(txt);
+  log("Current JSON Copied to clipboard.", "INFO");
 }
 
 function downloadJSON() {
-  if(!UI.output.value) return;
-  const blob = new Blob([UI.output.value], {type: "application/json"});
+  if(!STATE.finalJson) return;
+  const blob = new Blob([JSON.stringify(STATE.finalJson, null, 2)], {type: "application/json"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `translated_${new Date().getTime()}.json`;
+  a.download = `verified_translation_${new Date().getTime()}.json`;
   a.click();
   log("Download started.", "INFO");
 }
