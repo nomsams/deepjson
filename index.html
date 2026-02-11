@@ -286,7 +286,7 @@
 
 <header>
   <div class="brand">
-    JSON <span>TRANSMUTER</span> <div class="badge">PRO v2.1</div>
+    JSON <span>TRANSMUTER</span> <div class="badge">PRO v2.2</div>
   </div>
   <div style="display: flex; gap: 15px; align-items: center;">
     <button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="loadDemoData()">Load Demo JSON</button>
@@ -368,7 +368,7 @@
            </select>
            
            <label>Instructions</label>
-           <textarea id="verifyPrompt" style="height:120px;">Act like a professional translator that has work at the UN and translated technical documents. You started off like a translator for construction machinery. Check the translation and choose better versions of words if necessary. Ensure professional tone and maintain structure exactly.</textarea>
+           <textarea id="verifyPrompt" style="height:120px;">Act like a professional translator that has work at the UN and translated technical documents. You started off like a translator for construction machinery. Check the translation and choose better versions of words if necessary. Ensure professional tone and preserve HTML tags exactly.</textarea>
            
            <label style="color:var(--accent);">Glossary / Dictionary (Optional)</label>
            <textarea id="glossaryInput" style="height:80px; font-family:var(--font-mono);" placeholder="Wrong Word > Right Word&#10;English Word > Swedish Word"></textarea>
@@ -440,7 +440,7 @@ const CONFIG = {
   phPrefix: '{{IMG:',
   phSuffix: '}}',
   batchSize: 25, 
-  // STRICT target keys for translation
+  llmBatchSize: 50, // Process 50 flat strings at a time via LLM
   targetKeys: ["reference", "name", "itemDescription", "text", "terms"],
   proxies: {
       lovable: "https://onbkfqayveownervyktu.supabase.co/functions/v1/cors-proxy",
@@ -460,7 +460,7 @@ const CONFIG = {
 const STATE = {
   sourceObj: null,
   deepLJson: null,
-  finalJson: null // Stores the active, modifiable JSON
+  finalJson: null 
 };
 
 const UI = {
@@ -498,24 +498,20 @@ const UI = {
 // --- Initialization ---
 
 (function init(){
-  // Load persisted keys
   UI.deeplKey.value = localStorage.getItem('t_deeplKey') || '';
   UI.groqKey.value = localStorage.getItem('t_groqKey') || '';
   UI.proxyProvider.value = localStorage.getItem('t_proxyProvider') || 'lovable';
   UI.proxyUrl.value = localStorage.getItem('t_proxyUrl') || '';
   UI.glossaryInput.value = localStorage.getItem('t_glossary') || '';
   
-  // Only restore verify prompt if it exists, otherwise keep default HTML
   const savedPrompt = localStorage.getItem('t_verifyPrompt');
   if (savedPrompt) UI.verifyPrompt.value = savedPrompt;
 
-  // Load Headers
   UI.proxyHeaderKey.value = localStorage.getItem('t_proxyHeadKey') || 'x-proxy-key';
   UI.proxyHeaderVal.value = localStorage.getItem('t_proxyHeadVal') || 'chikibriki';
   
   updateProxyUI();
 
-  // Listeners
   UI.deeplKey.addEventListener('change', e => localStorage.setItem('t_deeplKey', e.target.value));
   UI.groqKey.addEventListener('change', e => localStorage.setItem('t_groqKey', e.target.value));
   UI.proxyUrl.addEventListener('change', e => localStorage.setItem('t_proxyUrl', e.target.value));
@@ -530,7 +526,6 @@ const UI = {
       updateProxyUI();
   });
 
-  // Toggles
   document.getElementById('themeSwitch').addEventListener('click', function() {
     this.classList.toggle('on');
     const isDark = this.classList.contains('on');
@@ -549,14 +544,13 @@ const UI = {
 
   UI.btnRun.addEventListener('click', runProcess);
 
-  // Close tooltip on outside click
   document.addEventListener('click', (e) => {
       if (!e.target.closest('.llm-changed') && !e.target.closest('#revertTooltip')) {
           hideRevertTooltip();
       }
   });
 
-  log('System Initialized. v2.1 Active. Inline Editing & Scrolling Fixed.', 'INFO');
+  log('System Initialized. v2.2 Precision Update. Flat-Map LLM Verify Active.', 'INFO');
 })();
 
 function updateProxyUI() {
@@ -602,18 +596,21 @@ async function runProcess() {
     // 2. Translate Batch via DeepL
     await translateSegments(segments, map);
 
-    // 3. Reconstruct DeepL JSON
+    // 3. Reconstruct DeepL JSON Backup
     log("Reconstructing DeepL Baseline...", "INFO");
     STATE.deepLJson = reconstructJson(STATE.sourceObj, map);
-    STATE.finalJson = JSON.parse(JSON.stringify(STATE.deepLJson)); // Default Final = DeepL
-
-    // 4. Overseer LLM Verification
+    
+    // 4. Overseer LLM Verification (Operates purely on the string mapping)
+    let finalMap = map;
     if(UI.verifyToggle.classList.contains('on')) {
       if(!UI.groqKey.value) throw new Error("Verification enabled but no Groq Key provided.");
-      STATE.finalJson = await verifyWithGroq(STATE.sourceObj, STATE.deepLJson);
+      finalMap = await verifyWithGroq(segments, map);
     }
 
-    // 5. Output UI Rendering
+    // 5. Final JSON Reconstruction using the Final Map
+    STATE.finalJson = reconstructJson(STATE.sourceObj, finalMap);
+
+    // 6. Output UI Rendering
     renderInteractiveOutput();
     log("Process Complete.", "SUCCESS");
     setProgress(100, "Done");
@@ -678,7 +675,7 @@ async function translateSegments(segments, map) {
     const batch = segments.slice(i, i + CONFIG.batchSize);
     processed += batch.length;
     
-    setProgress(Math.round((processed / total) * 50), `DeepL Translating ${processed}/${total}...`);
+    setProgress(Math.round((processed / total) * 40), `DeepL Translating ${processed}/${total}...`);
 
     let fetchUrl = deepLEndpoint;
     const deepLBody = {
@@ -745,6 +742,131 @@ async function translateSegments(segments, map) {
 }
 
 /**
+ * OpenAI / Groq LLM Verification - Operates FLAT Map, NOT JSON Structure
+ */
+async function verifyWithGroq(segments, deepLMap) {
+  log("Initiating LLM Overseer Flat-Map Verification...", "INFO");
+  
+  const key = UI.groqKey.value;
+  const model = UI.groqModel.value;
+  const promptTxt = UI.verifyPrompt.value;
+  const glossary = UI.glossaryInput.value.trim();
+  
+  const useProxy = UI.proxyToggle.classList.contains('on');
+  const proxyProvider = UI.proxyProvider.value;
+  let llmEndpoint = "https://api.groq.com/openai/v1/chat/completions";
+  
+  const finalMap = new Map(deepLMap); // Copy map to apply improvements to
+  const total = segments.length;
+  let processed = 0;
+
+  for (let i = 0; i < total; i += CONFIG.llmBatchSize) {
+      const batchSegments = segments.slice(i, i + CONFIG.llmBatchSize);
+      processed += batchSegments.length;
+      
+      setProgress(40 + Math.round((processed / total) * 50), `LLM Verifying Diffs ${processed}/${total}...`);
+      
+      // Construct a dictionary of { Original: DeepL } for this batch
+      const translationBatch = {};
+      batchSegments.forEach(seg => {
+          translationBatch[seg] = deepLMap.get(seg);
+      });
+
+      let sysContent = "You are a Translation QA Expert. You will receive a JSON object mapping original text to translated text. Return ONLY a JSON object with the exact same keys, where the values are the verified and improved translations. CRITICAL: If the original text contains HTML tags (e.g. <strong>, <br>), you MUST preserve them exactly in your improved translation.";
+      let userContent = `Instructions: ${promptTxt}\n\n`;
+      if (glossary) {
+          userContent += `!!! CRITICAL GLOSSARY (Apply these fixes if found in context):\n${glossary}\n\n`;
+      }
+      userContent += `Translations to Verify & Improve (JSON Map):\n${JSON.stringify(translationBatch, null, 2)}`;
+
+      let payloadBody = {
+          model: model,
+          messages: [
+            { role: "system", content: sysContent },
+            { role: "user", content: userContent }
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.2,
+          stream: false
+      };
+
+      if (model === "openai/gpt-oss-120b") {
+          payloadBody.reasoning_effort = "high";
+          payloadBody.max_completion_tokens = 65536;
+          payloadBody.top_p = 1;
+      }
+
+      let fetchUrl = llmEndpoint;
+      let fetchOptions = {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payloadBody)
+      };
+
+      if (useProxy) {
+          if (proxyProvider === 'lovable') {
+                fetchUrl = CONFIG.proxies.lovable;
+                fetchOptions = {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        [UI.proxyHeaderKey.value]: UI.proxyHeaderVal.value
+                    },
+                    body: JSON.stringify({
+                        url: llmEndpoint,
+                        method: 'POST',
+                        timeout: 300000, // 5 MINUTE TIMEOUT FOR OPENAI REASONING
+                        headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+                        body: payloadBody 
+                    })
+                };
+          } else {
+              fetchUrl = "https://thingproxy.freeboard.io/fetch/" + llmEndpoint;
+          }
+      }
+
+      log(`Sending LLM Batch ${(i/CONFIG.llmBatchSize)+1} to Model: ${model}...`, "NET");
+
+      try {
+          const res = await fetch(fetchUrl, fetchOptions);
+
+          if(!res.ok) {
+            const err = await res.text();
+            log(`LLM Batch Failed. Keeping DeepL version for this batch.`, "WARN", err);
+            continue; 
+          }
+
+          const data = await res.json();
+          
+          let content;
+          if (proxyProvider === 'lovable' && useProxy && data.body) {
+              content = data.body.choices[0].message.content;
+          } else if (data.choices) {
+              content = data.choices[0].message.content;
+          } else {
+              content = JSON.stringify(data);
+          }
+
+          const improvedBatch = JSON.parse(content);
+          
+          // Merge improved batch into final map securely
+          for (const [orig, improvedTrans] of Object.entries(improvedBatch)) {
+              if (finalMap.has(orig) && typeof improvedTrans === 'string') {
+                  finalMap.set(orig, improvedTrans);
+              }
+          }
+          log(`LLM Batch ${(i/CONFIG.llmBatchSize)+1} Complete.`, "SUCCESS");
+
+      } catch (e) {
+          log(`LLM Batch Error. Keeping DeepL version.`, "WARN", e.message);
+      }
+  }
+
+  log("LLM Verification Complete.", "SUCCESS");
+  return finalMap;
+}
+
+/**
  * Replaces strings in the original object using the Map
  */
 function reconstructJson(obj, map) {
@@ -759,107 +881,6 @@ function reconstructJson(obj, map) {
     return node;
   };
   return apply(obj);
-}
-
-/**
- * OpenAI / Groq LLM Verification with High Reasoning Output
- */
-async function verifyWithGroq(sourceObj, translatedObj) {
-  log("Initiating LLM Overseer Verification...", "INFO");
-  setProgress(70, "LLM Verifying Diffs...");
-  
-  const key = UI.groqKey.value;
-  const model = UI.groqModel.value;
-  const promptTxt = UI.verifyPrompt.value;
-  const glossary = UI.glossaryInput.value.trim();
-  
-  let sysContent = "You are a Translation QA Expert. Return ONLY the fully complete, valid JSON object matching the structure provided.";
-  let userContent = `Instructions: ${promptTxt}\n\n`;
-  if (glossary) {
-      userContent += `!!! CRITICAL GLOSSARY (You MUST apply these fixes if found in the translation):\n${glossary}\n\n`;
-  }
-  userContent += `Original JSON:\n${JSON.stringify(sourceObj).slice(0, 15000)}\n\n`;
-  userContent += `DeepL Translation (Fix this using glossary and context):\n${JSON.stringify(translatedObj)}`;
-
-  const useProxy = UI.proxyToggle.classList.contains('on');
-  const proxyProvider = UI.proxyProvider.value;
-  let llmEndpoint = "https://api.groq.com/openai/v1/chat/completions";
-  
-  let payloadBody = {
-      model: model,
-      messages: [
-        { role: "system", content: sysContent },
-        { role: "user", content: userContent }
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.2,
-      stream: false
-  };
-
-  if (model === "openai/gpt-oss-120b") {
-      payloadBody.reasoning_effort = "high";
-      payloadBody.max_completion_tokens = 65536;
-      payloadBody.top_p = 1;
-  }
-
-  let fetchUrl = llmEndpoint;
-  let fetchOptions = {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify(payloadBody)
-  };
-
-  if (useProxy) {
-      if (proxyProvider === 'lovable') {
-            fetchUrl = CONFIG.proxies.lovable;
-            fetchOptions = {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    [UI.proxyHeaderKey.value]: UI.proxyHeaderVal.value
-                },
-                body: JSON.stringify({
-                    url: llmEndpoint,
-                    method: 'POST',
-                    headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
-                    body: payloadBody 
-                })
-            };
-      } else {
-          fetchUrl = "https://thingproxy.freeboard.io/fetch/" + llmEndpoint;
-      }
-  }
-
-  log(`Sending to Model: ${model}...`, "NET");
-  setProgress(85, "Waiting for LLM Reasoning...");
-
-  const res = await fetch(fetchUrl, fetchOptions);
-
-  if(!res.ok) {
-    const err = await res.text();
-    log("LLM Verification Failed. Falling back to DeepL.", "WARN", err);
-    return translatedObj; 
-  }
-
-  const data = await res.json();
-  
-  let content;
-  if (proxyProvider === 'lovable' && useProxy && data.body) {
-      content = data.body.choices[0].message.content;
-  } else if (data.choices) {
-      content = data.choices[0].message.content;
-  } else {
-      content = JSON.stringify(data);
-  }
-
-  log("LLM Verification Complete.", "SUCCESS");
-  
-  try {
-    return JSON.parse(content);
-  } catch(e) {
-    log("LLM returned malformed JSON. Using raw DeepL translation.", "WARN");
-    return translatedObj;
-  }
 }
 
 // --- Interactive UI, Diffing & Editing ---
@@ -882,15 +903,10 @@ function escapeHtml(str) {
          .replace(/'/g, "&#039;");
 }
 
-/**
- * Handles manual typing inside the interactive viewer.
- * Fires on blur (when you click away from the text you just edited).
- */
 window.handleManualEdit = function(event, element) {
     const path = JSON.parse(element.getAttribute('data-path'));
-    const newValue = element.textContent; // Raw text without HTML wrapping
+    const newValue = element.textContent; 
     
-    // Check if it actually changed to prevent unnecessary updates
     let currentVal = STATE.finalJson;
     for (const p of path) currentVal = currentVal[p];
     
@@ -905,7 +921,6 @@ function buildInteractiveJsonHTML(deepLNode, finalNode, path = []) {
     if (typeof finalNode === 'boolean') return `<span class="json-boolean">${finalNode}</span>`;
     if (typeof finalNode === 'number') return `<span class="json-number">${finalNode}</span>`;
     
-    // STRING DIFFING & EDITING
     if (typeof finalNode === 'string') {
         const escapedFinal = escapeHtml(finalNode);
         const pathStr = escapeHtml(JSON.stringify(path));
@@ -913,13 +928,11 @@ function buildInteractiveJsonHTML(deepLNode, finalNode, path = []) {
         let deepLStr = deepLNode;
         if (typeof deepLNode === 'object' && deepLNode !== null) deepLStr = null; 
 
-        // If LLM explicitly changed it: HIGHLIGHT & EDITABLE
         if (typeof deepLStr === 'string' && deepLStr !== finalNode) {
             const encodedOriginal = encodeURIComponent(deepLStr);
             return `"<span class="llm-changed editable-value" contenteditable="plaintext-only" onblur="handleManualEdit(event, this)" onclick="handleHighlightClick(event, this)" data-path='${pathStr}' data-original="${encodedOriginal}">${escapedFinal}</span>"`;
         }
         
-        // Normal String: EDITABLE
         return `"<span class="json-string editable-value" contenteditable="plaintext-only" onblur="handleManualEdit(event, this)" data-path='${pathStr}'>${escapedFinal}</span>"`;
     }
     
@@ -965,9 +978,6 @@ let activePath = null;
 let activeOriginalStr = null;
 
 window.handleHighlightClick = function(event, element) {
-    // Only trigger tooltip if holding CTRL/CMD, otherwise let them edit
-    // Actually, letting both happen is fine, click opens tooltip, double click edits.
-    // We will show tooltip on click.
     event.stopPropagation();
     
     activePath = JSON.parse(element.getAttribute('data-path'));
